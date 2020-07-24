@@ -10,13 +10,19 @@ import config from "./config"
 const app = uws.App()
 const topic = "change_stream"
 
+type Model = "status" | "user" | "channel"
 type Message = {
     operation: string
-    model: string
+    model: "status" | "user" | "channel"
     document_id: any
+    status?: {
+        user_id: string
+        channel_id: string
+        community_id: string
+    }
 }
 
-function register(db: Db, model: string) {
+function register(db: Db, model: Model) {
     const collection = db.collection(model)
     collection.watch().on("change", (event) => {
         if (
@@ -25,19 +31,33 @@ function register(db: Db, model: string) {
             event.operationType == "delete"
         ) {
             const _id = event.documentKey._id as ObjectID
-            if (_id) {
-                const message: Message = {
-                    operation: event.operationType,
-                    model: model,
-                    document_id: _id.toHexString(),
+            if (_id == null) {
+                return
+            }
+            const message: Message = {
+                operation: event.operationType,
+                model: model,
+                document_id: _id.toHexString(),
+            }
+            if (
+                event.operationType == "insert" ||
+                event.operationType == "update"
+            ) {
+                const { fullDocument } = event
+                if (model === "status") {
+                    message["status"] = {
+                        user_id: fullDocument.user_id,
+                        channel_id: fullDocument.channel_id,
+                        community_id: fullDocument.community_id,
+                    }
                 }
-                for (let user of users) {
-                    try {
-                        user.publish(topic, JSON.stringify(message), false)
-                        // publishは1回行えば全clientに送信される
-                        break
-                    } catch (error) {}
-                }
+            }
+            for (let user of users) {
+                try {
+                    user.publish(topic, JSON.stringify(message), false)
+                    // publishは1回行えば全clientに送信される
+                    break
+                } catch (error) {}
             }
         }
     })
